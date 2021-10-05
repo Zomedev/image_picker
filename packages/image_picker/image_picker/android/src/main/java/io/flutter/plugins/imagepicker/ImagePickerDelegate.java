@@ -6,6 +6,7 @@ package io.flutter.plugins.imagepicker;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
@@ -90,7 +91,6 @@ public class ImagePickerDelegate
   private final ImageResizer imageResizer;
   private final ImagePickerCache cache;
   private final PermissionManager permissionManager;
-  private final IntentResolver intentResolver;
   private final FileUriResolver fileUriResolver;
   private final FileUtils fileUtils;
   private CameraDevice cameraDevice;
@@ -101,10 +101,6 @@ public class ImagePickerDelegate
     void askForPermission(String permissionName, int requestCode);
 
     boolean needRequestCameraPermission();
-  }
-
-  interface IntentResolver {
-    boolean resolveActivity(Intent intent);
   }
 
   interface FileUriResolver {
@@ -150,12 +146,6 @@ public class ImagePickerDelegate
             return ImagePickerUtils.needRequestCameraPermission(activity);
           }
         },
-        new IntentResolver() {
-          @Override
-          public boolean resolveActivity(Intent intent) {
-            return intent.resolveActivity(activity.getPackageManager()) != null;
-          }
-        },
         new FileUriResolver() {
           @Override
           public Uri resolveFileProviderUriForFile(String fileProviderName, File file) {
@@ -192,7 +182,6 @@ public class ImagePickerDelegate
       final MethodCall methodCall,
       final ImagePickerCache cache,
       final PermissionManager permissionManager,
-      final IntentResolver intentResolver,
       final FileUriResolver fileUriResolver,
       final FileUtils fileUtils) {
     this.activity = activity;
@@ -202,7 +191,6 @@ public class ImagePickerDelegate
     this.pendingResult = result;
     this.methodCall = methodCall;
     this.permissionManager = permissionManager;
-    this.intentResolver = intentResolver;
     this.fileUriResolver = fileUriResolver;
     this.fileUtils = fileUtils;
     this.cache = cache;
@@ -299,13 +287,6 @@ public class ImagePickerDelegate
       useFrontCamera(intent);
     }
 
-    boolean canTakePhotos = intentResolver.resolveActivity(intent);
-
-    if (!canTakePhotos) {
-      finishWithError("no_available_camera", "No cameras available for taking pictures.");
-      return;
-    }
-
     File videoFile = createTemporaryWritableVideoFile();
     pendingCameraMediaUri = Uri.parse("file:" + videoFile.getAbsolutePath());
 
@@ -313,7 +294,18 @@ public class ImagePickerDelegate
     intent.putExtra(MediaStore.EXTRA_OUTPUT, videoUri);
     grantUriPermissions(intent, videoUri);
 
-    activity.startActivityForResult(intent, REQUEST_CODE_TAKE_VIDEO_WITH_CAMERA);
+    try {
+      activity.startActivityForResult(intent, REQUEST_CODE_TAKE_VIDEO_WITH_CAMERA);
+    } catch (ActivityNotFoundException e) {
+      try {
+        // If we can't delete the file again here, there's not really anything we can do about it.
+        //noinspection ResultOfMethodCallIgnored
+        videoFile.delete();
+      } catch (SecurityException exception) {
+        exception.printStackTrace();
+      }
+      finishWithError("no_available_camera", "No cameras available for taking pictures.");
+    }
   }
 
   public void chooseImageFromGallery(MethodCall methodCall, MethodChannel.Result result) {
@@ -366,13 +358,6 @@ public class ImagePickerDelegate
       useFrontCamera(intent);
     }
 
-    boolean canTakePhotos = intentResolver.resolveActivity(intent);
-
-    if (!canTakePhotos) {
-      finishWithError("no_available_camera", "No cameras available for taking pictures.");
-      return;
-    }
-
     File imageFile = createTemporaryWritableImageFile();
     pendingCameraMediaUri = Uri.parse("file:" + imageFile.getAbsolutePath());
 
@@ -380,7 +365,18 @@ public class ImagePickerDelegate
     intent.putExtra(MediaStore.EXTRA_OUTPUT, imageUri);
     grantUriPermissions(intent, imageUri);
 
-    activity.startActivityForResult(intent, REQUEST_CODE_TAKE_IMAGE_WITH_CAMERA);
+    try {
+      activity.startActivityForResult(intent, REQUEST_CODE_TAKE_IMAGE_WITH_CAMERA);
+    } catch (ActivityNotFoundException e) {
+      try {
+        // If we can't delete the file again here, there's not really anything we can do about it.
+        //noinspection ResultOfMethodCallIgnored
+        imageFile.delete();
+      } catch (SecurityException exception) {
+        exception.printStackTrace();
+      }
+      finishWithError("no_available_camera", "No cameras available for taking pictures.");
+    }
   }
 
   private File createTemporaryWritableImageFile() {
